@@ -2,6 +2,7 @@ import './main.css';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import GUI from 'lil-gui';
+import gsap from 'gsap';
 import fragment from './shaders/fragment.glsl.js';
 import vertex from './shaders/vertex.glsl.js';
 import { FontLoader } from 'three/addons/loaders/FontLoader.js';
@@ -10,8 +11,8 @@ import {
   MSDFTextMaterial,
   uniforms,
 } from 'three-msdf-text-utils';
-import fnt from './fonts/Alkatra-VariableFont_wght-msdf.json';
-import png from './fonts/Alkatra-VariableFontwght.png';
+import fnt from './fonts/DIN-Bold-msdf/DIN-Bold-msdf.json';
+import png from './fonts/DIN-Bold-msdf/DIN-Bold.png';
 
 export default class Sketch {
   constructor() {
@@ -63,9 +64,13 @@ export default class Sketch {
         font: fnt,
       });
 
+      geometry.computeBoundingBox();
+
+      // let aspect = 3.5
+
       // const material = new MSDFTextMaterial();
 
-      const material = new THREE.ShaderMaterial({
+      this.material = new THREE.ShaderMaterial({
         side: THREE.DoubleSide,
         transparent: true,
         defines: {
@@ -85,6 +90,11 @@ export default class Sketch {
           ...uniforms.strokes,
           ...{
             uStrokeColor: { value: new THREE.Color(0x00ff00) },
+            uProgress1: { value: 0 },
+            uProgress2: { value: 0 },
+            uProgress3: { value: 0 },
+            uProgress4: { value: 0 },
+            time: { value: 0 },
           },
         },
         vertexShader: `
@@ -149,6 +159,7 @@ export default class Sketch {
         fragmentShader: `
         // Varyings
         varying vec2 vUv;
+        varying vec2 vLayoutUv;
 
         // Uniforms: Common
         uniform float uOpacity;
@@ -163,6 +174,12 @@ export default class Sketch {
         uniform float uStrokeInsetWidth;
 
         // Utils: Median
+        uniform float uProgress1;
+        uniform float uProgress2;
+        uniform float uProgress3;
+        uniform float uProgress4;
+        uniform float time;
+        
         float median(float r, float g, float b) {
             return max(min(r, g), min(max(r, g), b));
         }
@@ -232,16 +249,67 @@ export default class Sketch {
             // Output: Common
 
             vec4 filledFragColor = vec4(uColor, uOpacity * alpha);
+            // gl_FragColor = filledFragColor;
 
-            gl_FragColor = filledFragColor;
-            // gl_FragColor = vec4(1., 0. , 0., 1.);
+            vec3 pink = vec3(0.834, 0.066, 0.780);
+
+            vec4 l1 = vec4(1., 1., 1., border);
+            vec4 l2 = vec4(pink, border);
+            vec4 l3 = vec4(pink, 1.);
+            vec4 l4 = vec4(vec3(1.), 1.);
+
+            float x = floor(vLayoutUv.x * 10. * 3.5);
+            float y = floor(vLayoutUv.y * 10.);
+            float pattern = noise(vec2(x,y));
+
+            float w = 1.;
+
+            // Gray border
+            float p1 = uProgress1;
+            p1 = map(p1, 0., 1. , -w, 1.);
+            p1 = smoothstep(p1, p1 + w, vLayoutUv.x);
+            float mix1 = p1 * 2. - pattern;
+            mix1 = clamp(mix1, 0., 1.);
+
+            // White border
+            float p2 = uProgress2;
+            p2 = map(p2, 0., 1. , -w, 1.);
+            p2 = smoothstep(p2, p2 + w, vLayoutUv.x);
+            float mix2 = p2 * 2. - pattern;
+            mix2 = clamp(mix2, 0., 1.);
+
+            // Pink color
+            float p3 = uProgress3;
+            p3 = map(p3, 0., 1. , -w, 1.);
+            p3 = smoothstep(p3, p3 + w, vLayoutUv.x);
+            float mix3 = p3 * 2. - pattern;
+            mix3 = clamp(mix3, 0., 1.);
+
+            // White color
+            float p4 = uProgress4;
+            p4 = map(p4, 0., 1. , -w, 1.);
+            p4 = smoothstep(p4, p4 + w, vLayoutUv.x);
+            float mix4 = p4 * 2. - pattern;
+            mix4 = clamp(mix4, 0., 1.);
+
+            vec4 layer1 = mix(vec4(0.), l1, 1. - mix1);
+            vec4 layer2 = mix(layer1, l2, 1. - mix2);
+            vec4 layer3 = mix(layer2, l3, 1. - mix3);
+            vec4 layer4 = mix(layer3, l4, 1. - mix4);
+
+            gl_FragColor = vec4(uProgress1 * 1., 0. , 0., 1.);
+            gl_FragColor = l3;
+            gl_FragColor = vec4(vec3(pattern), 1.);
+            // gl_FragColor = vec4(vec3(mix1), 1.);
+            // gl_FragColor = l1;
+            gl_FragColor = layer4;
         }
     `,
       });
 
-      material.uniforms.uMap.value = atlas;
+      this.material.uniforms.uMap.value = atlas;
 
-      const mesh = new THREE.Mesh(geometry, material);
+      const mesh = new THREE.Mesh(geometry, this.material);
       mesh.scale.set(0.02, -0.02, 0.02);
       mesh.position.x = -1.5;
       this.scene.add(mesh);
@@ -267,14 +335,60 @@ export default class Sketch {
   }
 
   settings() {
-    let that = this;
     this.settings = {
-      progress: 0,
+      uProgress1: 0,
+      uProgress2: 0,
+      uProgress3: 0,
+      uProgress4: 0,
+      gogo: () => {
+        let duration = 1.5;
+        let delay = 0.15;
+        let timeline = gsap.timeline();
+
+        timeline.to(this.material.uniforms.uProgress1, {
+          value: 1,
+          duration: duration,
+        });
+        timeline.to(
+          this.material.uniforms.uProgress2,
+          {
+            value: 1,
+            duration: duration,
+          },
+          delay
+        );
+        timeline.to(
+          this.material.uniforms.uProgress3,
+          {
+            value: 1,
+            duration: duration,
+          },
+          delay * 2
+        );
+        timeline.to(
+          this.material.uniforms.uProgress4,
+          {
+            value: 1,
+            duration: duration,
+          },
+          delay * 3
+        );
+      },
     };
     this.gui = new GUI();
-    this.gui.add(this.settings, 'progress', 0, 1, 0.01).onChange(() => {
-      this.material.uniforms.progress.value = this.settings.progress;
+    this.gui.add(this.settings, 'uProgress1', 0, 1, 0.01).onChange(() => {
+      this.material.uniforms.uProgress1.value = this.settings.uProgress1;
     });
+    this.gui.add(this.settings, 'uProgress2', 0, 1, 0.01).onChange(() => {
+      this.material.uniforms.uProgress2.value = this.settings.uProgress2;
+    });
+    this.gui.add(this.settings, 'uProgress3', 0, 1, 0.01).onChange(() => {
+      this.material.uniforms.uProgress3.value = this.settings.uProgress3;
+    });
+    this.gui.add(this.settings, 'uProgress4', 0, 1, 0.01).onChange(() => {
+      this.material.uniforms.uProgress4.value = this.settings.uProgress4;
+    });
+    this.gui.add(this.settings, 'gogo');
   }
 
   render() {
